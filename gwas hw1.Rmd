@@ -1,0 +1,97 @@
+---
+title: "GWAS Analysis"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This document performs a Genome-Wide Association Study (GWAS) using a Generalized Linear Model (GLM) approach, incorporating population structure correction.
+
+## Install and Load Required Packages
+```{r}
+if (!requireNamespace("data.table", quietly = TRUE)) install.packages("data.table")
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+if (!requireNamespace("GLMGWAS", quietly = TRUE)) install.packages("GLMGWAS")
+
+library(GLMGWAS)
+library(data.table)
+library(dplyr)
+```
+
+## Load Data
+```{r}
+# Load phenotype data
+y <- fread("C:/Users/alexa/PL_P-545-Statistical Genomics/hw 1/CROP545_Phenotype.txt")
+y <- y %>% rename(Phenotype = Obs)
+
+# Load genotype data
+X <- fread("C:/Users/alexa/PL_P-545 – Statistical Genomics/hw 1/mdp_numeric.txt")
+X <- as.matrix(X[,-1])  # Remove taxa column and convert to matrix
+
+# Load covariate data
+C <- fread("C:/Users/alexa/PL_P-545 – Statistical Genomics/hw 1/CROP545_Covariates.txt")
+
+# Load SNP information
+snp_info <- fread("C:/Users/alexa/PL_P-545 – Statistical Genomics/hw 1/mdp_SNP_information.txt")
+colnames(snp_info) <- c("SNP", "Chromosome", "Position")
+```
+
+## Data Preprocessing
+```{r}
+# Ensure the taxa names match across datasets
+taxa_names <- intersect(y$Taxa, C$Taxa)
+y <- y %>% filter(Taxa %in% taxa_names) %>% select(Phenotype)
+C <- C %>% filter(Taxa %in% taxa_names) %>% select(-Taxa)
+```
+
+## Population Structure Correction
+```{r}
+# Run PCA for population structure correction
+
+# Remove columns with zero variance
+X <- X[, apply(X, 2, var) > 0]
+
+# Run PCA after filtering
+PCs <- PCA_GWAS(X, C)
+
+
+PCs <- PCA_GWAS(X, C)
+
+# Combine covariates and principal components
+C_combined <- cbind(C, PCs)
+```
+
+## Perform GWAS
+```{r}
+# Run GWAS
+# Run both GWAS methods
+p_values_glm <- GLM_GWAS(y, X, C_combined)
+p_values_gwasbycor <- apply(X, 2, function(snp) cor.test(y[[1]], snp)$p.value)
+```
+
+## Save and Display Results
+```{r}
+# Save results for both methods
+results <- data.frame(SNP = colnames(X), 
+                      p_value_GLM = p_values_glm, 
+                      p_value_GWASbyCor = p_values_gwasbycor)
+
+# Merge with SNP info
+results <- merge(results, snp_info, by = "SNP", all.x = TRUE)
+fwrite(results, "GWAS_comparison_results.txt")
+
+# Display top significant SNPs for both methods
+head(results[order(results$p_value_GLM), ])
+
+# Visualize the comparison
+boxplot(results$p_value_GLM, results$p_value_GWASbyCor, 
+        names = c("GLM_GWAS", "GWASbyCor"),
+        main = "Comparison of GWAS Methods",
+        ylab = "p-values", col = c("blue", "red"))
+
+```

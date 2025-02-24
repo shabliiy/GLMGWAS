@@ -1,0 +1,126 @@
+---
+title: "GWAS Analysis with GLM"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Required Libraries
+```{r}
+library(stats)
+library(data.table)
+library(ggplot2)
+library(MASS)
+library(Matrix)
+library(parallel)
+library(qqman)
+library(car)  # Needed for linear dependence check
+```
+
+## Load Data
+```{r}
+genotype_data <- fread("mdp_numeric.txt", header = TRUE)
+snp_info <- fread("mdp_SNP_information.txt", header = TRUE)
+phenotype_data <- fread("CROP545_Phenotype.txt", header = TRUE)
+covariates_data <- fread("CROP545_Covariates.txt", header = TRUE)
+
+# Ensure correct column names in phenotype data
+print(colnames(phenotype_data))
+phenotype_col <- "Obs"  # Using correct column name from file
+
+# Convert genotype data to numeric (remove SNP IDs)
+genotype_numeric <- as.matrix(genotype_data[, -1, with = FALSE])
+genotype_numeric <- apply(genotype_numeric, 2, as.numeric)  # Ensure all are numeric
+
+# Remove columns with zero variance (constant SNPs)
+genotype_numeric <- genotype_numeric[, apply(genotype_numeric, 2, var, na.rm = TRUE) > 0, drop = FALSE]
+
+# Convert covariates to numeric matrix
+covariates_matrix <- as.matrix(covariates_data[, -1, with = FALSE])  # Exclude first column (Taxa)
+```
+
+## PCA for Population Structure (Handling Linear Dependence)
+```{r}
+compute_pcs <- function(X, num_pcs = 10, C = NULL) {
+  if (ncol(X) == 0) {
+    stop("Error: All genotype columns have zero variance. Check your data.")
+  }
+
+  pca_res <- prcomp(X, scale. = TRUE)
+  pcs <- as.data.frame(pca_res$x[, 1:num_pcs])
+  
+  if (!is.null(C)) {
+    keep_pcs <- sapply(pcs, function(pc) {
+      vif_model <- lm(pc ~ ., data = as.data.frame(C))
+      max(vif(vif_model)) < 10  # Keep PCs with VIF < 10
+    })
+    pcs <- pcs[, keep_pcs, drop = FALSE]
+  }
+  
+  return(as.matrix(pcs))
+}
+```
+
+## Running GWAS Analysis
+```{r}
+pca_results <- compute_pcs(genotype_numeric, num_pcs = 10, C = covariates_matrix)
+full_covariates <- cbind(covariates_matrix, pca_results)  # Combine covariates & PCs
+
+results <- glm_gwas(phenotype_data[[phenotype_col]], genotype_numeric, full_covariates)
+results$p_value_adj <- multiple_testing_correction(results$p_value)
+```
+
+## Visualizing Results - Manhattan Plot
+```{r}
+plot_manhattan <- function(gwas_results, snp_info) {
+  # Ensure SNP column names are consistent
+  gwas_results$SNP <- as.character(gwas_results$SNP)
+  snp_info$SNP <- as.character(snp_info$SNP)
+
+  # Merge GWAS results with SNP information
+  merged_data <- merge(gwas_results, snp_info, by = "SNP", all.x = TRUE)
+
+  # Ensure required columns exist
+  if (!"Chromosome" %in% colnames(merged_data)) {
+    stop("Error: 'Chromosome' column not found in merged data. Check SNP information file.")
+  }
+  if (!"Position" %in% colnames(merged_data)) {
+    stop("Error: 'Position' column not found in merged data. Check SNP information file.")
+  }
+
+  # Remove SNPs with missing chromosome information
+  merged_data <- merged_data[!is.na(merged_data$Chromosome), ]
+
+  # Assign SNP index for plotting
+  merged_data <- merged_data[order(merged_data$Chromosome, merged_data$Position), ]
+  merged_data$Index <- seq_len(nrow(merged_data))  # Sequential index for x-axis
+
+  # Set significance threshold
+  threshold <- -log10(5e-8)  
+
+  # Create a color vector alternating per chromosome
+  unique_chromosomes <- unique(merged_data$Chromosome)
+  color.vector <- rep(c("deepskyblue", "orange", "forestgreen", "indianred3", "brown", "purple"), length.out = length(unique_chromosomes))
+  names(color.vector) <- unique_chromosomes
+
+  # Identify top SNPs to highlight
+  top_snps <- merged_data[merged_data$p_value < 5e-8, ]
+
+  # Manhattan plot with chromosome-based coloring
+  ggplot(merged_data, aes(x = Index, y = -log10(p_value), color = Chromosome)) +
+    geom_point(shape = 1, size = 2) +  # Hollow circles for points
+    geom_hline(yintercept = threshold, linetype = "solid", color = "black", size = 1) +  # Significance threshold line
+    geom_vline(data = top_snps, aes(xintercept = Index), color = "red", linetype = "dashed", size = 1) +  # Highlight SNPs
+    scale_color_manual(values = color.vector) +
+    theme_minimal() +
+    labs(title = "Manhattan Plot", x = "SNP Index", y = "-log10(p-value)") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+}
+
+# Run the updated function
+plot_manhattan(results, snp_info)
+```
