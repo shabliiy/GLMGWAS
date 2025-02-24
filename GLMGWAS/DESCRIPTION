@@ -1,12 +1,11 @@
 Package: GLMGWAS
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Title: Generalized Linear Model-Based GWAS
+Version: 0.1.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Oleksandra", "Shabliy", email = "alexandra.shably@gmail.com", role = c("aut", "cre"))
+Description: An R package for performing genome-wide association studies (GWAS) using Generalized Linear Models (GLM).
+License: MIT
 Encoding: UTF-8
+LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1
